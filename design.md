@@ -32,11 +32,13 @@ polymarket_anomaly/
 
 ### Per Poll Cycle
 
-1. **Fetch markets** — GET Gamma API, top `MARKET_LIMIT` markets sorted by `valuation24hr`. Store/upsert to `markets` table.
-2. **Fetch trades** — For each market, GET Data API with `conditionId`, filtered to `TRADE_WINDOW_HOURS`. Upsert to `trades` table.
-3. ~~**Fetch current prices**~~ — CLOB API requires an API key; skipped for MVP. `current_price` is derived from `outcomePrices` returned by the Gamma API instead.
-4. **Compute signals** — Run signal engine over fetched trades + market data.
-5. **Classify flags** — For each trade with ≥2 signals, call Ollama. Write result to `flags` table.
+1. **Fetch markets** — GET Gamma API, top `MARKET_LIMIT` markets sorted by `volume24hr` (`order=volume24hr&ascending=false`).
+2. **Filter relevant markets** — Batch LLM call (`filter_relevant_markets`): send all market titles + `condition_id`s to Ollama, get back `[{condition_id, relevant: true/false}]`. Validate no silent drops. Only relevant (politics/economics) markets proceed.
+3. **Filter active** — From relevant markets, drop any whose `end_date` has passed. Upsert remaining into `markets` table (with `active` flag). These are the poll targets for this cycle.
+4. ~~**Fetch current prices**~~ — CLOB API requires an API key; skipped for MVP. `current_price` is derived from `outcomePrices` returned by the Gamma API instead.
+5. **Fetch trades** — For each active+relevant market, GET Data API with `conditionId`, filtered to `TRADE_WINDOW_HOURS`. Trades are accumulated into `trades_by_market` across **all** markets before signal computation. Upsert to `trades` table.
+6. **Compute signals** — Run signal engine over the full `trades_by_market` dict (required for `cross_market_wallet` signal).
+7. **Classify flags** — For each trade with ≥2 signals, call Ollama. Write result to `flags` table.
 
 ## Module Design
 
@@ -48,8 +50,8 @@ Reads from environment variables with defaults:
 POLL_INTERVAL       = int(os.getenv("POLL_INTERVAL", 3600))
 MARKET_LIMIT        = int(os.getenv("MARKET_LIMIT", 100))
 TRADE_WINDOW_HOURS  = int(os.getenv("TRADE_WINDOW_HOURS", 1))
-MIN_TRADE_SIZE      = float(os.getenv("MIN_TRADE_SIZE", 500))
-OLLAMA_ENDPOINT     = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")
+MIN_TRADE_SIZE     = float(os.getenv("MIN_TRADE_SIZE", 5000))
+OLLAMA_ENDPOINT     = os.getenv("OLLAMA_ENDPOINT", "http://sunils-mac-studio:11434")
 OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 DB_PATH             = os.getenv("DB_PATH", "./polymarket.db")
 ```
@@ -106,22 +108,25 @@ All requests use a shared `httpx.AsyncClient` with a 10s timeout. HTTP errors ar
 Returns a `dict[str, list[str]]` mapping `transaction_hash → [signal_names]`.
 
 **Trade-level signals** (evaluated per trade):
-- `large_position`: `trade.size >= MIN_TRADE_SIZE`
+- `large_position`: `trade.size >= MIN_TRADE_SIZE` (default $5000)
 - `contrarian_trade`: `abs(trade.price - current_price) > 0.15` (15pp deviation; `current_price` sourced from `outcomePrices` in the Gamma market payload)
-- `cross_market_wallet`: same `proxy_wallet` seen in ≥2 markets with the same `eventSlug` within the trade window
+- `rapid_repeat_trades`: same `proxy_wallet` makes ≥3 trades in the same market within the trade window
+- `size_outlier`: `trade.size > mean + 2σ` of all trade sizes in that market this cycle (requires ≥3 trades to compute)
 
 **Market-level signal** (evaluated per market, applied to all trades in that market):
-- `volume_price_shift`: price moved >10pp while volume in window is below the market's median hourly volume
+- `volume_price_shift`: price moved >10pp while volume in window is below 10% of market liquidity
 
 **Flag threshold**: a trade is flagged only if it has ≥2 signals.
 
-Thresholds for `contrarian_trade` and `volume_price_shift` are constants in `signals.py`, easy to tune after initial data collection.
+Thresholds are constants in `signals.py`, easy to tune after initial data collection.
 
 ### `classifier.py`
 
-Calls Ollama's `/api/generate` endpoint with a structured prompt. Parses JSON from the response.
+Two functions, both calling Ollama's `/api/chat` with `stream: false` and `temperature: 0`.
 
-**Prompt template:**
+**`filter_relevant_markets(markets) -> list[Market]`** — Batch call. Sends all market titles + condition_ids, gets back a JSON array of `{condition_id, relevant}`. Validates every condition_id against the input set and logs silent drops. Fails open (returns all markets) on Ollama failure or parse error.
+
+**`classify(trade, market, signals) -> Flag`** — Single-trade call. Prompt:
 ```
 Market: {title}
 Trade: {side} {size} shares of "{outcome}" at price {price}
@@ -155,15 +160,24 @@ ON CONFLICT(transaction_hash) DO UPDATE SET fetched_at=excluded.fetched_at
 ```python
 async def poll_cycle():
     markets = await fetch_markets(config.MARKET_LIMIT)
-    upsert_markets(markets)
-    for market in markets:
-        trades = await fetch_trades(market.condition_id, config.TRADE_WINDOW_HOURS)
+    upsert_markets(markets)                          # all 100, with active flag
+
+    relevant = await filter_relevant_markets(markets)
+    upsert_relevant_markets(relevant)
+
+    active_relevant = [m for m in relevant if not expired(m.end_date)]
+
+    trades_by_market = {}
+    for market in active_relevant:                   # accumulate ALL before signals
+        trades = await fetch_trades(market.condition_id)
+        trades_by_market[market.condition_id] = trades
         upsert_trades(trades)
-    signal_map = compute_signals(trades_by_market, current_prices)
+
+    signal_map = compute_signals(trades_by_market, markets_by_id)
     for tx_hash, signals in signal_map.items():
         if len(signals) >= 2:
-            result = await classify(trade, market, signals, current_prices)
-            upsert_flag(result)
+            flag = await classify(trade, market, signals)
+            upsert_flag(flag)
 
 async def main():
     init_db()
@@ -181,8 +195,11 @@ CREATE TABLE IF NOT EXISTS markets (
     volume       REAL,
     liquidity    REAL,
     end_date     TEXT,
+    active       INTEGER DEFAULT 1,  -- 0 if end_date has passed
     fetched_at   TEXT
+    -- only topically relevant (politics/economics) markets are stored here
 );
+CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
 
 CREATE TABLE IF NOT EXISTS trades (
     transaction_hash TEXT PRIMARY KEY,
