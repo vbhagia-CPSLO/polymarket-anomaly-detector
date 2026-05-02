@@ -32,6 +32,8 @@ def compute_signals(
     signals: dict[str, list[str]] = defaultdict(list)
 
     for condition_id, trades in trades_by_market.items():
+        # Sort by timestamp descending (newest first) for volume_price_shift
+        trades = sorted(trades, key=lambda t: t.timestamp, reverse=True)
         market = markets_by_id.get(condition_id)
         current_price = market.outcome_prices[0] if market and market.outcome_prices else None
 

@@ -37,21 +37,21 @@ Just me, running locally.
 - No authentication required
 - Fields used: `proxyWallet`, `side`, `size`, `price`, `timestamp`, `outcome`, `transactionHash`, `title`
 
-### CLOB API — Current Price (optional, for price impact)
+### CLOB API — Current Price (skipped for MVP)
 `GET https://clob.polymarket.com/price?token_id=<asset>`
-- Used to compute price deviation: how far a trade's price is from current consensus
+- Requires API key; skipped for MVP
+- Current price is derived from `outcomePrices` in the Gamma API response instead
 
 ## Anomaly Signals
 
-### Group 1 — Market-Level (per market, per poll)
-- **Volume-adjusted price shift**: significant probability movement relative to trade volume in the window. A small amount of money causing a large price shift indicates either thin liquidity or informed trading.
-- Threshold: [tune after initial data collection]
+### Market-Level (per market, per poll)
+- **Volume-price shift**: price moved >10pp across the trade window while total volume is <10% of market liquidity. Indicates thin-market manipulation or informed trading.
 
-### Group 2 — Trade-Level (per trade, within top 100 markets)
-- **Large position**: `size` above threshold (e.g. >$500)
-- **Contrarian trade**: trade `price` significantly deviates from current market consensus price
-- **Cross-market wallet**: same `proxyWallet` appearing across multiple related markets (same `eventSlug`) in a short window
-- **Combined signal**: large position + high price impact = highest priority flag
+### Trade-Level (per trade, within relevant markets)
+- **Large position**: `size` ≥ $5,000
+- **Contrarian trade**: trade `price` deviates >15pp from current market consensus (`outcomePrices`)
+- **Rapid repeat trades**: same `proxyWallet` makes ≥3 trades in the same market within the trade window
+- **Size outlier**: trade `size` > mean + 2σ of all trades in that market this cycle (requires ≥3 trades)
 
 Noise reduction: require at least 2 signals to trigger a flag.
 
@@ -70,23 +70,25 @@ Noise reduction: require at least 2 signals to trigger a flag.
 SQLite, local file. Three tables:
 
 **`markets`**
-- `condition_id` (PK), `title`, `volume`, `liquidity`, `end_date`, `fetched_at`
+- `condition_id` (PK), `title`, `volume`, `liquidity`, `end_date`, `active`, `fetched_at`
+- Only topically relevant (politics/economics) markets are stored
+- `active` = 1 when `end_date` has not passed, 0 when expired
 
 **`trades`**
 - `transaction_hash` (PK), `condition_id` (FK), `proxy_wallet`, `side`, `size`, `price`, `outcome`, `timestamp`, `fetched_at`
 
 **`flags`**
-- `id` (PK), `transaction_hash` (FK), `condition_id` (FK), `signals_triggered`, `anomaly_type`, `confidence`, `reasoning`, `flagged_at`
+- `id` (PK), `transaction_hash` (UNIQUE FK), `condition_id` (FK), `signals_triggered`, `signal_count`, `anomaly_type`, `confidence`, `reasoning`, `flagged_at`
 
 Upsert on `transaction_hash` to avoid duplicates across poll cycles.
 
 ## Configuration
 
 - `POLL_INTERVAL` — how often to run (default: 1 hour)
-- `MARKET_LIMIT` — number of markets to fetch, sorted by valuation24hr (default: 100)
+- `MARKET_LIMIT` — number of markets to fetch, sorted by volume24hr (default: 100)
 - `TRADE_WINDOW_HOURS` — how far back to fetch trades per market (default: 1 hour)
-- `MIN_TRADE_SIZE` — minimum size to consider for trade-level signals (default: $500)
-- `OLLAMA_ENDPOINT` — local Ollama base URL (default: http://localhost:11434)
+- `MIN_TRADE_SIZE` — minimum size to consider for `large_position` signal (default: $5,000)
+- `OLLAMA_ENDPOINT` — local Ollama base URL (default: http://sunils-mac-studio:11434)
 - `OLLAMA_MODEL` — model to use (default: qwen2.5:7b)
 - `DB_PATH` — SQLite file path (default: ./polymarket.db)
 

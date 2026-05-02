@@ -97,3 +97,55 @@ def test_upsert_market_updates_volume(conn):
 
     vol = conn.execute("SELECT volume FROM markets WHERE condition_id='0x1'").fetchone()[0]
     assert vol == 9999.0
+
+# --- upsert_flag idempotency ---
+
+def test_upsert_flag_is_idempotent(conn):
+    from models import Flag, Trade
+    # Need a market and trade first for FK
+    m = make_market("0x1", end_date=NOW + timedelta(days=10))
+    db.upsert_market(conn, m)
+    t = Trade(transaction_hash="0xtx1", condition_id="0x1", proxy_wallet="0xw",
+              side="BUY", size=6000.0, price=0.2, outcome="Yes",
+              timestamp=str(int(NOW.timestamp())), fetched_at=NOW.isoformat())
+    db.upsert_trade(conn, t)
+    conn.commit()
+
+    f = Flag(transaction_hash="0xtx1", condition_id="0x1",
+             signals_triggered=["large_position", "contrarian_trade"],
+             anomaly_type="informed_trading", confidence="high",
+             reasoning="test", flagged_at=NOW.isoformat())
+    db.upsert_flag(conn, f)
+    db.upsert_flag(conn, f)  # second insert should not duplicate
+    conn.commit()
+
+    count = conn.execute("SELECT COUNT(*) FROM flags WHERE transaction_hash='0xtx1'").fetchone()[0]
+    assert count == 1
+
+
+def test_upsert_flag_updates_on_conflict(conn):
+    from models import Flag, Trade
+    m = make_market("0x1", end_date=NOW + timedelta(days=10))
+    db.upsert_market(conn, m)
+    t = Trade(transaction_hash="0xtx1", condition_id="0x1", proxy_wallet="0xw",
+              side="BUY", size=6000.0, price=0.2, outcome="Yes",
+              timestamp=str(int(NOW.timestamp())), fetched_at=NOW.isoformat())
+    db.upsert_trade(conn, t)
+    conn.commit()
+
+    f1 = Flag(transaction_hash="0xtx1", condition_id="0x1",
+              signals_triggered=["large_position"], anomaly_type="unclassified",
+              confidence="low", reasoning="first", flagged_at=NOW.isoformat())
+    db.upsert_flag(conn, f1)
+
+    f2 = Flag(transaction_hash="0xtx1", condition_id="0x1",
+              signals_triggered=["large_position", "contrarian_trade"],
+              anomaly_type="informed_trading", confidence="high",
+              reasoning="updated", flagged_at=NOW.isoformat())
+    db.upsert_flag(conn, f2)
+    conn.commit()
+
+    row = conn.execute("SELECT signal_count, anomaly_type, reasoning FROM flags WHERE transaction_hash='0xtx1'").fetchone()
+    assert row[0] == 2
+    assert row[1] == "informed_trading"
+    assert row[2] == "updated"

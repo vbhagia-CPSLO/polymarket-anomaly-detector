@@ -36,7 +36,7 @@ def init_db(db_path: str = config.DB_PATH) -> sqlite3.Connection:
 
         CREATE TABLE IF NOT EXISTS flags (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            transaction_hash  TEXT REFERENCES trades(transaction_hash),
+            transaction_hash  TEXT UNIQUE REFERENCES trades(transaction_hash),
             condition_id      TEXT REFERENCES markets(condition_id),
             signals_triggered TEXT,
             signal_count      INTEGER,
@@ -47,6 +47,16 @@ def init_db(db_path: str = config.DB_PATH) -> sqlite3.Connection:
         );
     """)
     conn.commit()
+
+    # Migration: dedupe flags and ensure unique index for existing DBs
+    conn.executescript("""
+        DELETE FROM flags WHERE id NOT IN (
+            SELECT MIN(id) FROM flags GROUP BY transaction_hash
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_flags_tx ON flags(transaction_hash);
+    """)
+    conn.commit()
+
     return conn
 
 
@@ -76,5 +86,9 @@ def upsert_flag(conn: sqlite3.Connection, f: Flag) -> None:
         INSERT INTO flags
             (transaction_hash, condition_id, signals_triggered, signal_count, anomaly_type, confidence, reasoning, flagged_at)
         VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(transaction_hash) DO UPDATE SET
+            signals_triggered=excluded.signals_triggered, signal_count=excluded.signal_count,
+            anomaly_type=excluded.anomaly_type, confidence=excluded.confidence,
+            reasoning=excluded.reasoning, flagged_at=excluded.flagged_at
     """, (f.transaction_hash, f.condition_id, json.dumps(f.signals_triggered),
           len(f.signals_triggered), f.anomaly_type, f.confidence, f.reasoning, f.flagged_at))
