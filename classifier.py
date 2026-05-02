@@ -109,7 +109,7 @@ async def _classify_batch(markets: list[Market]) -> tuple[set[str], set[str]]:
     return relevant_ids, returned_ids
 
 
-async def filter_relevant_markets(markets: list[Market], batch_size: int = 50) -> list[Market]:
+async def filter_relevant_markets(markets: list[Market], batch_size: int = 25) -> list[Market]:
     """Batch LLM call to filter markets to politics/economics only.
     Splits into batches of batch_size to improve accuracy on smaller models.
     Retries once for any markets silently dropped. Fails open for persistent drops."""

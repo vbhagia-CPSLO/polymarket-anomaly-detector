@@ -33,7 +33,7 @@ polymarket_anomaly/
 ### Per Poll Cycle
 
 1. **Fetch markets** — GET Gamma API, top `MARKET_LIMIT` markets sorted by `volume24hr` (`order=volume24hr&ascending=false`).
-2. **Filter relevant markets** — Batch LLM call (`filter_relevant_markets`): send all market titles + `condition_id`s to Ollama, get back `[{condition_id, relevant: true/false}]`. Validate no silent drops. Only relevant (politics/economics) markets proceed.
+2. **Filter relevant markets** — Batch LLM call (`filter_relevant_markets`): markets are split into batches of 25 and sent to Ollama with `condition_id` + title. Returns `[{condition_id, relevant: true/false}]`. Validates no silent drops (retries once for dropped markets, fails open for persistent drops). Only relevant (politics/economics) markets proceed.
 3. **Filter active** — From relevant markets, drop any whose `end_date` has passed. Upsert remaining into `markets` table (with `active` flag). These are the poll targets for this cycle.
 4. ~~**Fetch current prices**~~ — CLOB API requires an API key; skipped for MVP. `current_price` is derived from `outcomePrices` returned by the Gamma API instead.
 5. **Fetch trades** — For each active+relevant market, GET Data API with `conditionId`, filtered to `TRADE_WINDOW_HOURS`. Trades are accumulated into `trades_by_market` across **all** markets before signal computation. Upsert to `trades` table.
@@ -52,7 +52,7 @@ MARKET_LIMIT        = int(os.getenv("MARKET_LIMIT", 100))
 TRADE_WINDOW_HOURS  = int(os.getenv("TRADE_WINDOW_HOURS", 1))
 MIN_TRADE_SIZE     = float(os.getenv("MIN_TRADE_SIZE", 5000))
 OLLAMA_ENDPOINT     = os.getenv("OLLAMA_ENDPOINT", "http://sunils-mac-studio:11434")
-OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL        = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
 DB_PATH             = os.getenv("DB_PATH", "./polymarket.db")
 ```
 
@@ -124,7 +124,7 @@ Thresholds are constants in `signals.py`, easy to tune after initial data collec
 
 Two functions, both calling Ollama's `/api/chat` with `stream: false` and `temperature: 0`.
 
-**`filter_relevant_markets(markets) -> list[Market]`** — Batch call. Sends all market titles + condition_ids, gets back a JSON array of `{condition_id, relevant}`. Validates every condition_id against the input set and logs silent drops. Fails open (returns all markets) on Ollama failure or parse error.
+**`filter_relevant_markets(markets) -> list[Market]`** — Batched call (25 markets per batch). Sends market titles + condition_ids, gets back a JSON array of `{condition_id, relevant}`. Validates every condition_id against the input set, retries once for dropped markets, and fails open for persistent drops or Ollama failure.
 
 **`classify(trade, market, signals) -> Flag`** — Single-trade call. Prompt:
 ```

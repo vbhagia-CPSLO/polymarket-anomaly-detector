@@ -6,7 +6,7 @@ A local polling system that monitors political and economic prediction markets o
 
 Each hour it:
 1. Fetches the top 100 markets by 24hr volume from Polymarket
-2. Uses a local Ollama instance to filter down to politics/economics markets only
+2. Uses a local Ollama instance to filter down to politics/economics markets only (batched in groups of 25 for accuracy)
 3. Fetches all trades from the last hour for active relevant markets
 4. Runs a signal engine to detect anomalous trades
 5. Classifies flagged trades via LLM and persists everything to SQLite
@@ -28,7 +28,7 @@ Flagged trades are classified by the LLM as: `informed_trading`, `wash_trading`,
 ## Requirements
 
 - Python 3.9+
-- [Ollama](https://ollama.ai) running locally with `qwen2.5:7b` pulled
+- [Ollama](https://ollama.ai) running locally with `qwen2.5:32b` pulled
 
 ## Setup
 
@@ -63,7 +63,7 @@ echo $! > polymarket.pid
 | `TRADE_WINDOW_HOURS` | `1` | How far back to fetch trades |
 | `MIN_TRADE_SIZE` | `5000` | Minimum trade size for `large_position` signal |
 | `OLLAMA_ENDPOINT` | `http://sunils-mac-studio:11434` | Ollama base URL |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | Model to use for classification |
+| `OLLAMA_MODEL` | `qwen2.5:32b` | Model to use for classification |
 | `DB_PATH` | `./polymarket.db` | SQLite database path |
 
 ## Database
