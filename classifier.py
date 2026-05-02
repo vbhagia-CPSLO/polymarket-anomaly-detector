@@ -109,25 +109,32 @@ async def _classify_batch(markets: list[Market]) -> tuple[set[str], set[str]]:
     return relevant_ids, returned_ids
 
 
-async def filter_relevant_markets(markets: list[Market]) -> list[Market]:
+async def filter_relevant_markets(markets: list[Market], batch_size: int = 50) -> list[Market]:
     """Batch LLM call to filter markets to politics/economics only.
-    Retries once for any markets silently dropped in the first pass.
-    Fails open (treats as relevant) for any still missing after retry."""
+    Splits into batches of batch_size to improve accuracy on smaller models.
+    Retries once for any markets silently dropped. Fails open for persistent drops."""
     if not markets:
         return []
 
     markets_by_id = {m.condition_id: m for m in markets}
+    relevant_ids: set[str] = set()
+    all_returned_ids: set[str] = set()
+
+    # Process in batches
+    for i in range(0, len(markets), batch_size):
+        batch = markets[i:i + batch_size]
+        batch_relevant, batch_returned = await _classify_batch(batch)
+        relevant_ids |= batch_relevant
+        all_returned_ids |= batch_returned
+
+    # Retry any dropped markets across all batches
     valid_ids = set(markets_by_id)
+    missing_ids = valid_ids - all_returned_ids
 
-    # First pass
-    relevant_ids, returned_ids = await _classify_batch(markets)
-
-    if not returned_ids:
-        # Complete failure — fail open
-        logger.warning("filter_relevant_markets: first pass failed entirely, treating all as relevant")
+    if not all_returned_ids:
+        logger.warning("filter_relevant_markets: all batches failed, treating all as relevant")
         return markets
 
-    missing_ids = valid_ids - returned_ids
     if missing_ids:
         logger.warning("filter_relevant_markets: first pass dropped %d markets, retrying", len(missing_ids))
         missing_markets = [markets_by_id[cid] for cid in missing_ids]
@@ -141,7 +148,7 @@ async def filter_relevant_markets(markets: list[Market]) -> list[Market]:
                 len(still_missing),
                 [markets_by_id[cid].title for cid in still_missing],
             )
-            relevant_ids |= still_missing  # fail open for persistent drops
+            relevant_ids |= still_missing
 
     logger.info("filter_relevant_markets: %d/%d markets relevant", len(relevant_ids), len(markets))
     return [m for m in markets if m.condition_id in relevant_ids]
