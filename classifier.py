@@ -41,15 +41,25 @@ Now classify the following markets:
 {markets_json}"""
 
 _PROMPT_TEMPLATE = """\
+A trade on a prediction market has been flagged by an automated signal engine.
+
 Market: {title}
 Trade: {side} {size} shares of "{outcome}" at price {price}
 Current market price: {current_price} (from Gamma outcomePrices)
-Signals triggered: {signals}
 
-Classify this trade. Respond with JSON only:
+The following automated signals were triggered (these are NOT your classification options):
+{signals}
+
+Your job is to classify WHY this trade is suspicious. Pick exactly one of these four categories:
+- informed_trading: trader likely has non-public information
+- wash_trading: trader is trading with themselves to fake volume or move price
+- liquidity_shock: a sudden liquidity event, not necessarily malicious
+- normal_large_trade: large but not suspicious, just a whale
+
+Respond with JSON only, no explanation outside the JSON:
 {{
-  "anomaly_type": "informed_trading|wash_trading|liquidity_shock|normal_large_trade",
-  "confidence": "low|medium|high",
+  "anomaly_type": "<one of: informed_trading, wash_trading, liquidity_shock, normal_large_trade>",
+  "confidence": "<one of: low, medium, high>",
   "reasoning": "<one sentence>"
 }}"""
 
