@@ -147,3 +147,84 @@ def test_no_volume_price_shift_with_single_trade():
     trade = make_trade("tx1", "0xabc", size=10.0, price=0.6)
     result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
     assert "volume_price_shift" not in result.get("tx1", [])
+
+# --- relative_size ---
+
+def test_relative_size_signal():
+    # trade.size=600, liquidity=10000 → 6% > 5%
+    market = make_market("0xabc", liquidity=10000.0)
+    trade = make_trade("tx1", "0xabc", size=600.0)
+    result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
+    assert "relative_size" in result["tx1"]
+
+
+def test_no_relative_size_below_threshold():
+    # trade.size=100, liquidity=10000 → 1% < 5%
+    market = make_market("0xabc", liquidity=10000.0)
+    trade = make_trade("tx1", "0xabc", size=100.0)
+    result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
+    assert "relative_size" not in result.get("tx1", [])
+
+
+# --- pre_resolution_trade ---
+
+def test_pre_resolution_trade_signal():
+    from datetime import timedelta
+    # Market ends in 12 hours, trade is large
+    end = datetime.now(timezone.utc) + timedelta(hours=12)
+    market = make_market("0xabc")
+    market.end_date = end.isoformat()
+    trade = make_trade("tx1", "0xabc", size=6000.0)
+    result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
+    assert "pre_resolution_trade" in result["tx1"]
+
+
+def test_no_pre_resolution_trade_far_from_end():
+    from datetime import timedelta
+    # Market ends in 30 days
+    end = datetime.now(timezone.utc) + timedelta(days=30)
+    market = make_market("0xabc")
+    market.end_date = end.isoformat()
+    trade = make_trade("tx1", "0xabc", size=6000.0)
+    result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
+    assert "pre_resolution_trade" not in result.get("tx1", [])
+
+
+def test_no_pre_resolution_trade_small_size():
+    from datetime import timedelta
+    # Near resolution but trade is small
+    end = datetime.now(timezone.utc) + timedelta(hours=12)
+    market = make_market("0xabc")
+    market.end_date = end.isoformat()
+    trade = make_trade("tx1", "0xabc", size=100.0)
+    result = compute_signals({"0xabc": [trade]}, {"0xabc": market})
+    assert "pre_resolution_trade" not in result.get("tx1", [])
+
+
+# --- price_impact ---
+
+def test_price_impact_signal():
+    # Two trades: newer at 0.7, older at 0.6 → shift=0.1 > 0.05
+    market = make_market("0xabc", outcome_prices=[0.7, 0.3])
+    trades = [
+        make_trade("tx_new", "0xabc", price=0.7, wallet="0xa"),
+        make_trade("tx_old", "0xabc", price=0.6, wallet="0xb"),
+    ]
+    # Ensure ordering by giving distinct timestamps
+    trades[0].timestamp = "9999999999"
+    trades[1].timestamp = "9999999998"
+    result = compute_signals({"0xabc": trades}, {"0xabc": market})
+    assert "price_impact" in result["tx_new"]
+
+
+def test_no_price_impact_small_shift():
+    # Two trades: 0.60 and 0.61 → shift=0.01 < 0.05
+    market = make_market("0xabc", outcome_prices=[0.61, 0.39])
+    trades = [
+        make_trade("tx_new", "0xabc", price=0.61, wallet="0xa"),
+        make_trade("tx_old", "0xabc", price=0.60, wallet="0xb"),
+    ]
+    trades[0].timestamp = "9999999999"
+    trades[1].timestamp = "9999999998"
+    result = compute_signals({"0xabc": trades}, {"0xabc": market})
+    assert "price_impact" not in result.get("tx_new", [])

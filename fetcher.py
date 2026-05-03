@@ -54,28 +54,43 @@ async def fetch_markets(limit: int = config.MARKET_LIMIT) -> list[Market]:
 async def fetch_trades(condition_id: str, since_hours: int = config.TRADE_WINDOW_HOURS) -> list[Trade]:
     cutoff = datetime.now(timezone.utc).timestamp() - since_hours * 3600
     fetched_at = datetime.now(timezone.utc).isoformat()
+    page_size = 500
+    trades = []
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(_DATA_URL, params={"conditionId": condition_id, "limit": 500})
-            resp.raise_for_status()
-            trades = []
-            for t in resp.json():
-                if float(t.get("timestamp", 0)) < cutoff:
-                    continue
-                if t.get("conditionId") != condition_id:
-                    continue
-                trades.append(Trade(
-                    transaction_hash=t["transactionHash"],
-                    condition_id=t["conditionId"],
-                    proxy_wallet=t.get("proxyWallet", ""),
-                    side=t.get("side", ""),
-                    size=float(t.get("size", 0) or 0),
-                    price=float(t.get("price", 0) or 0),
-                    outcome=t.get("outcome", ""),
-                    timestamp=str(t.get("timestamp", "")),
-                    fetched_at=fetched_at,
-                ))
-            return trades
+            offset = 0
+            while True:
+                resp = await client.get(_DATA_URL, params={
+                    "conditionId": condition_id, "limit": page_size, "offset": offset,
+                })
+                resp.raise_for_status()
+                batch = resp.json()
+                if not batch:
+                    break
+                past_window = False
+                for t in batch:
+                    ts = float(t.get("timestamp", 0))
+                    if ts < cutoff:
+                        past_window = True
+                        continue
+                    if t.get("conditionId") != condition_id:
+                        continue
+                    trades.append(Trade(
+                        transaction_hash=t["transactionHash"],
+                        condition_id=t["conditionId"],
+                        proxy_wallet=t.get("proxyWallet", ""),
+                        side=t.get("side", ""),
+                        size=float(t.get("size", 0) or 0),
+                        price=float(t.get("price", 0) or 0),
+                        outcome=t.get("outcome", ""),
+                        timestamp=str(t.get("timestamp", "")),
+                        fetched_at=fetched_at,
+                    ))
+                # If we got trades older than the window, no need to fetch more
+                if past_window or len(batch) < page_size:
+                    break
+                offset += page_size
+        return trades
     except Exception as e:
         logger.warning("fetch_trades(%s) failed: %s", condition_id, e)
-        return []
+        return trades  # return whatever we got so far

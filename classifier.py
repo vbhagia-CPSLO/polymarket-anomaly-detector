@@ -13,17 +13,26 @@ _VALID_ANOMALY_TYPES = {"informed_trading", "wash_trading", "liquidity_shock", "
 _VALID_CONFIDENCE = {"low", "medium", "high"}
 
 _RELEVANCE_PROMPT = """\
-You are a classifier for prediction market questions. For each market, classify whether it is related to politics or economics.
+You are a strict classifier for prediction market questions. For each market, classify whether it is DIRECTLY about politics or economics. Be conservative — when in doubt, mark false.
 
-DEFINITIONS:
-- Politics: elections, government, legislation, political figures, geopolitical events, war, diplomacy, international relations, regime change, military action, sanctions
-- Economics: interest rates, inflation, financial markets, trade, employment, GDP, central banks, tariffs, commodities (e.g. oil, gold)
+RELEVANT (mark true):
+- Elections, government policy, legislation, political figures, political parties
+- Geopolitical events: war, diplomacy, international relations, regime change, military action, sanctions, treaties
+- Macroeconomics: interest rates, inflation, GDP, employment, central bank decisions, tariffs, trade policy
+- Commodities ONLY when tied to policy (e.g. "Will oil sanctions be lifted?")
+
+NOT RELEVANT (mark false):
+- Sports: ANY sports market including esports, NBA, NFL, MLB, soccer, MMA, League of Legends, Counter-Strike, etc.
+- Cryptocurrency: Bitcoin, Ethereum, token prices, DeFi, NFTs, crypto regulation
+- Entertainment: movies, TV shows, music, awards, celebrities, social media
+- Weather, science, technology products, company earnings, stock prices
+- Gaming, streaming, YouTube, TikTok
+- Anything where the core question is about a game, match, or competition outcome
 
 RULES:
-- Mark relevant = true if the market is about politics OR economics
-- Mark relevant = false for everything else: sports, entertainment, cryptocurrency, celebrity, gaming, etc.
 - Return ONLY a valid JSON array, no preamble, no explanation, no markdown, no code fences
-- If you are unsure, mark relevant = true
+- You MUST return one entry per market provided — do not skip any
+- If a market could be interpreted as both political and sports/entertainment, mark false
 
 OUTPUT FORMAT:
 [{{"condition_id": "0x...", "relevant": true}}, ...]
@@ -32,15 +41,25 @@ Now classify the following markets:
 {markets_json}"""
 
 _PROMPT_TEMPLATE = """\
+A trade on a prediction market has been flagged by an automated signal engine.
+
 Market: {title}
 Trade: {side} {size} shares of "{outcome}" at price {price}
 Current market price: {current_price} (from Gamma outcomePrices)
-Signals triggered: {signals}
 
-Classify this trade. Respond with JSON only:
+The following automated signals were triggered (these are NOT your classification options):
+{signals}
+
+Your job is to classify WHY this trade is suspicious. Pick exactly one of these four categories:
+- informed_trading: trader likely has non-public information
+- wash_trading: trader is trading with themselves to fake volume or move price
+- liquidity_shock: a sudden liquidity event, not necessarily malicious
+- normal_large_trade: large but not suspicious, just a whale
+
+Respond with JSON only, no explanation outside the JSON:
 {{
-  "anomaly_type": "informed_trading|wash_trading|liquidity_shock|normal_large_trade",
-  "confidence": "low|medium|high",
+  "anomaly_type": "<one of: informed_trading, wash_trading, liquidity_shock, normal_large_trade>",
+  "confidence": "<one of: low, medium, high>",
   "reasoning": "<one sentence>"
 }}"""
 
@@ -90,25 +109,32 @@ async def _classify_batch(markets: list[Market]) -> tuple[set[str], set[str]]:
     return relevant_ids, returned_ids
 
 
-async def filter_relevant_markets(markets: list[Market]) -> list[Market]:
+async def filter_relevant_markets(markets: list[Market], batch_size: int = 25) -> list[Market]:
     """Batch LLM call to filter markets to politics/economics only.
-    Retries once for any markets silently dropped in the first pass.
-    Fails open (treats as relevant) for any still missing after retry."""
+    Splits into batches of batch_size to improve accuracy on smaller models.
+    Retries once for any markets silently dropped. Fails open for persistent drops."""
     if not markets:
         return []
 
     markets_by_id = {m.condition_id: m for m in markets}
+    relevant_ids: set[str] = set()
+    all_returned_ids: set[str] = set()
+
+    # Process in batches
+    for i in range(0, len(markets), batch_size):
+        batch = markets[i:i + batch_size]
+        batch_relevant, batch_returned = await _classify_batch(batch)
+        relevant_ids |= batch_relevant
+        all_returned_ids |= batch_returned
+
+    # Retry any dropped markets across all batches
     valid_ids = set(markets_by_id)
+    missing_ids = valid_ids - all_returned_ids
 
-    # First pass
-    relevant_ids, returned_ids = await _classify_batch(markets)
-
-    if not returned_ids:
-        # Complete failure — fail open
-        logger.warning("filter_relevant_markets: first pass failed entirely, treating all as relevant")
+    if not all_returned_ids:
+        logger.warning("filter_relevant_markets: all batches failed, treating all as relevant")
         return markets
 
-    missing_ids = valid_ids - returned_ids
     if missing_ids:
         logger.warning("filter_relevant_markets: first pass dropped %d markets, retrying", len(missing_ids))
         missing_markets = [markets_by_id[cid] for cid in missing_ids]
@@ -122,7 +148,7 @@ async def filter_relevant_markets(markets: list[Market]) -> list[Market]:
                 len(still_missing),
                 [markets_by_id[cid].title for cid in still_missing],
             )
-            relevant_ids |= still_missing  # fail open for persistent drops
+            relevant_ids |= still_missing
 
     logger.info("filter_relevant_markets: %d/%d markets relevant", len(relevant_ids), len(markets))
     return [m for m in markets if m.condition_id in relevant_ids]
