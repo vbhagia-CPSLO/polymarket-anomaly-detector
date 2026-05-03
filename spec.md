@@ -57,7 +57,7 @@ Noise reduction: require at least 2 signals to trigger a flag.
 
 ## Classification
 
-- Model: `qwen2.5:32b` via local Ollama instance (configurable via `OLLAMA_MODEL`)
+- Model: `qwen2.5:14b` via local Ollama instance (configurable via `OLLAMA_MODEL`)
 - Markets are classified for relevance in batches of 25 for accuracy
 - Triggered only on flagged trades/events (not all trades)
 - Input: market title, trade details, signals triggered, current market price

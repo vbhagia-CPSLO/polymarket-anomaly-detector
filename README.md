@@ -28,7 +28,7 @@ Flagged trades are classified by the LLM as: `informed_trading`, `wash_trading`,
 ## Requirements
 
 - Python 3.9+
-- [Ollama](https://ollama.ai) running locally with `qwen2.5:32b` pulled
+- [Ollama](https://ollama.ai) running locally with `qwen2.5:14b` pulled
 
 ## Setup
 
@@ -63,7 +63,7 @@ echo $! > polymarket.pid
 | `TRADE_WINDOW_HOURS` | `1` | How far back to fetch trades |
 | `MIN_TRADE_SIZE` | `5000` | Minimum trade size for `large_position` signal |
 | `OLLAMA_ENDPOINT` | `http://sunils-mac-studio:11434` | Ollama base URL |
-| `OLLAMA_MODEL` | `qwen2.5:32b` | Model to use for classification |
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Model to use for classification |
 | `DB_PATH` | `./polymarket.db` | SQLite database path |
 
 ## Database
