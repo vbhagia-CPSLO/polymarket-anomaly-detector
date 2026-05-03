@@ -219,6 +219,15 @@ async def classify(trade: Trade, market: Market, signals: list[str]) -> Flag:
         if confidence not in _VALID_CONFIDENCE:
             raise ValueError(f"invalid confidence: {confidence!r}")
 
+        # Override confidence based on signal count — LLM tends to over-report "high"
+        n = len(signals)
+        if n >= 4:
+            confidence = "high"
+        elif n == 3:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
         return Flag(
             transaction_hash=trade.transaction_hash,
             condition_id=trade.condition_id,

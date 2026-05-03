@@ -56,7 +56,7 @@ async def test_classify_valid_response():
 
     assert isinstance(flag, Flag)
     assert flag.anomaly_type == "informed_trading"
-    assert flag.confidence == "high"
+    assert flag.confidence == "low"
     assert flag.signals_triggered == SIGNALS
     assert flag.transaction_hash == "0xtx1"
 
