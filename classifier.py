@@ -19,14 +19,15 @@ RELEVANT (mark true):
 - Elections, government policy, legislation, political figures, political parties
 - Geopolitical events: war, diplomacy, international relations, regime change, military action, sanctions, treaties
 - Macroeconomics: interest rates, inflation, GDP, employment, central bank decisions, tariffs, trade policy
-- Commodities ONLY when tied to policy (e.g. "Will oil sanctions be lifted?")
+- Cryptocurrency and asset prices: Bitcoin, Ethereum, token prices, stock indices, commodities (oil, gold, etc.)
+- Financial regulation, central bank decisions, Fed rate changes
 
 NOT RELEVANT (mark false):
-- Sports: ANY sports market including esports, NBA, NFL, MLB, soccer, MMA, League of Legends, Counter-Strike, etc.
-- Cryptocurrency: Bitcoin, Ethereum, token prices, DeFi, NFTs, crypto regulation
-- Entertainment: movies, TV shows, music, awards, celebrities, social media
-- Weather, science, technology products, company earnings, stock prices
-- Gaming, streaming, YouTube, TikTok
+- Sports: ANY sports market including NBA, NFL, MLB, NHL, soccer, MMA, F1, tennis, etc.
+- Esports and gaming: League of Legends, Counter-Strike, Valorant, Dota, etc.
+- Entertainment: movies, TV shows, music, awards, Eurovision (song contest), celebrities
+- Social media activity (e.g. tweet counts, follower counts)
+- Technology product releases unrelated to policy
 - Anything where the core question is about a game, match, or competition outcome
 
 RULES:
@@ -71,7 +72,7 @@ async def _classify_batch(markets: list[Market]) -> tuple[set[str], set[str]]:
     valid_ids = {m.condition_id for m in markets}
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(
                 f"{config.OLLAMA_ENDPOINT}/api/chat",
                 json={
@@ -179,7 +180,7 @@ async def classify(trade: Trade, market: Market, signals: list[str]) -> Flag:
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(
                 f"{config.OLLAMA_ENDPOINT}/api/chat",
                 json={

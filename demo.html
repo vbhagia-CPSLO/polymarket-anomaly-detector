@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Anomaly Detector — KiroHacks Demo</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0e17;color:#e0e6ed;line-height:1.6}
+.container{max-width:1200px;margin:0 auto;padding:0 24px}
+header{text-align:center;padding:60px 0 40px;background:linear-gradient(135deg,#0a0e17 0%,#1a1f35 100%);border-bottom:1px solid #1e2a3a}
+header h1{font-size:2.4rem;font-weight:700;background:linear-gradient(90deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header p.sub{color:#8892a4;font-size:1.1rem;margin-top:8px}
+.stats-row{display:flex;gap:16px;justify-content:center;margin-top:28px;flex-wrap:wrap}
+.stat-card{background:#111827;border:1px solid #1e2a3a;border-radius:12px;padding:20px 28px;text-align:center;min-width:160px}
+.stat-card .num{font-size:2rem;font-weight:700;color:#60a5fa}
+.stat-card .num.red{color:#f87171}
+.stat-card .num.green{color:#34d399}
+.stat-card .num.yellow{color:#fbbf24}
+.stat-card .lbl{font-size:.8rem;color:#8892a4;text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+section{padding:48px 0}
+section h2{font-size:1.6rem;font-weight:700;margin-bottom:8px}
+section h2 span{color:#60a5fa}
+section .section-sub{color:#8892a4;margin-bottom:28px;font-size:.95rem}
+.card{background:#111827;border:1px solid #1e2a3a;border-radius:12px;padding:24px;margin-bottom:16px}
+.card h3{font-size:1.1rem;font-weight:600;margin-bottom:12px}
+.case-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+.case-card{background:#111827;border:1px solid #1e2a3a;border-radius:12px;padding:20px;position:relative;overflow:hidden}
+.case-card::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%;background:#f87171}
+.case-card.clean::before{background:#34d399}
+.case-card .case-title{font-weight:600;font-size:.95rem;margin-bottom:6px}
+.case-card .case-detail{font-size:.82rem;color:#8892a4}
+.case-card .case-amount{font-size:1.3rem;font-weight:700;color:#f87171;margin-top:8px}
+.case-card.clean .case-amount{color:#34d399}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;padding:10px 12px;border-bottom:2px solid #1e2a3a;color:#8892a4;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.5px}
+td{padding:10px 12px;border-bottom:1px solid #1e2a3a}
+tr:hover{background:#1a1f35}
+.badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.75rem;font-weight:600}
+.badge-red{background:#7f1d1d;color:#fca5a5}
+.badge-yellow{background:#78350f;color:#fde68a}
+.badge-green{background:#064e3b;color:#6ee7b7}
+.badge-blue{background:#1e3a5f;color:#93c5fd}
+.signal-tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.72rem;margin:2px;background:#1e2a3a;color:#93c5fd}
+.confusion{display:grid;grid-template-columns:auto 1fr 1fr;grid-template-rows:auto 1fr 1fr;gap:2px;max-width:400px;margin:20px auto;text-align:center;font-size:.9rem}
+.confusion .corner{background:transparent}
+.confusion .header{background:#1e2a3a;padding:12px;font-weight:600;border-radius:6px}
+.confusion .cell{padding:16px;border-radius:6px;font-size:1.4rem;font-weight:700}
+.confusion .tp{background:#064e3b;color:#34d399}
+.confusion .fp{background:#78350f;color:#fde68a}
+.confusion .fn{background:#7f1d1d;color:#fca5a5}
+.confusion .tn{background:#1e3a5f;color:#93c5fd}
+.metrics-row{display:flex;gap:24px;justify-content:center;margin-top:20px;flex-wrap:wrap}
+.metric{text-align:center}
+.metric .val{font-size:1.8rem;font-weight:700;color:#60a5fa}
+.metric .mlbl{font-size:.8rem;color:#8892a4;text-transform:uppercase}
+.arch-diagram{background:#0d1117;border:1px solid #1e2a3a;border-radius:12px;padding:32px;margin:20px 0}
+.arch-steps{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+.arch-step{background:#111827;border:1px solid #1e2a3a;border-radius:10px;padding:14px 18px;text-align:center;min-width:130px}
+.arch-step .step-num{font-size:.7rem;color:#60a5fa;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.arch-step .step-title{font-size:.85rem;font-weight:600;margin-top:4px}
+.arch-step .step-detail{font-size:.72rem;color:#8892a4;margin-top:2px}
+.arch-arrow{color:#3b4a5a;font-size:1.2rem}
+footer{text-align:center;padding:40px 0;color:#4a5568;font-size:.85rem;border-top:1px solid #1e2a3a}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>🔍 Polymarket Anomaly Detector</h1>
+    <p class="sub">Automated insider trading detection for prediction markets using signal analysis + local LLM classification</p>
+    <div class="stats-row">
+      <div class="stat-card"><div class="num">36</div><div class="lbl">Markets Monitored</div></div>
+      <div class="stat-card"><div class="num red">15</div><div class="lbl">Flags Raised</div></div>
+      <div class="stat-card"><div class="num green">0.71</div><div class="lbl">F1 Score</div></div>
+      <div class="stat-card"><div class="num yellow">86%</div><div class="lbl">Recall</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- SECTION 1: THE PROBLEM -->
+<section>
+  <div class="container">
+    <h2>💰 The <span>Problem</span></h2>
+    <p class="section-sub">Prediction markets like Polymarket move billions in volume. Insiders exploit advance knowledge of geopolitical events to profit — and it's been proven in court.</p>
+    <div class="case-grid">
+      <div class="case-card">
+        <div class="case-title">Gannon Van Dyke — Maduro Capture</div>
+        <div class="case-detail">Active-duty special forces soldier used advance knowledge of the U.S. operation to capture Venezuelan President Maduro. Criminal indictment filed.</div>
+        <div class="case-amount">$440,000 profit</div>
+      </div>
+      <div class="case-card">
+        <div class="case-title">IDF Reservist — Twelve-Day War</div>
+        <div class="case-detail">Israeli Air Force reservist bet on the timing of Israel's opening strikes. Indicted alongside accomplice.</div>
+        <div class="case-amount">$162,663 profit</div>
+      </div>
+      <div class="case-card">
+        <div class="case-title">US Strikes Iran — Feb 28 Cluster</div>
+        <div class="case-detail">Linked wallets purchased "yes" shares hours before coordinated US-Israel airstrikes. Traced by Bubblemaps.</div>
+        <div class="case-amount">$494,375 profit</div>
+      </div>
+      <div class="case-card">
+        <div class="case-title">Iran Ceasefire — April 7</div>
+        <div class="case-detail">50+ newly created accounts placed bets minutes before Trump announced the deal on Truth Social. Congressional investigation opened.</div>
+        <div class="case-amount">$100,000s profit</div>
+      </div>
+      <div class="case-card">
+        <div class="case-title">Nobel Peace Prize — Machado</div>
+        <div class="case-detail">Account "dirtycup" opened weeks prior, placed $70k bet on Machado. Norwegian Nobel Institute investigating leak.</div>
+        <div class="case-amount">$30,000 profit</div>
+      </div>
+      <div class="case-card">
+        <div class="case-title">Paris CDG Temperature</div>
+        <div class="case-detail">Individual rigged a weather sensor at Charles de Gaulle airport to manipulate temperature prediction markets.</div>
+        <div class="case-amount">$34,000 profit</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 2: HOW IT WORKS -->
+<section style="background:#0d1117">
+  <div class="container">
+    <h2>⚙️ How It <span>Works</span></h2>
+    <p class="section-sub">Every hour, the system polls Polymarket, filters to political/economic markets via LLM, runs a 5-signal anomaly engine, and classifies flagged trades.</p>
+    <div class="arch-diagram">
+      <div class="arch-steps">
+        <div class="arch-step">
+          <div class="step-num">Step 1</div>
+          <div class="step-title">Fetch Markets</div>
+          <div class="step-detail">Top 100 by 24hr volume from Polymarket Gamma API</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-step">
+          <div class="step-num">Step 2</div>
+          <div class="step-title">LLM Filter</div>
+          <div class="step-detail">qwen2.5:14b classifies politics/economics relevance</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-step">
+          <div class="step-num">Step 3</div>
+          <div class="step-title">Fetch Trades</div>
+          <div class="step-detail">All trades from last hour for relevant markets</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-step">
+          <div class="step-num">Step 4</div>
+          <div class="step-title">Signal Engine</div>
+          <div class="step-detail">5 anomaly signals, flag if ≥2 triggered</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-step">
+          <div class="step-num">Step 5</div>
+          <div class="step-title">LLM Classify</div>
+          <div class="step-detail">Categorize as informed, wash, liquidity, or normal</div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:32px;margin-bottom:16px">Anomaly Signals</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+      <div class="card" style="padding:16px"><strong>large_position</strong><br><span style="color:#8892a4;font-size:.82rem">Trade ≥ $5,000</span></div>
+      <div class="card" style="padding:16px"><strong>contrarian_trade</strong><br><span style="color:#8892a4;font-size:.82rem">Price deviates &gt;15pp from consensus (volatility-adjusted)</span></div>
+      <div class="card" style="padding:16px"><strong>rapid_repeat_trades</strong><br><span style="color:#8892a4;font-size:.82rem">Same wallet ≥3 trades in window</span></div>
+      <div class="card" style="padding:16px"><strong>size_outlier</strong><br><span style="color:#8892a4;font-size:.82rem">Trade &gt; mean + 2σ for market</span></div>
+      <div class="card" style="padding:16px"><strong>volume_price_shift</strong><br><span style="color:#8892a4;font-size:.82rem">Price moved &gt;10pp on &lt;10% liquidity (volatility-adjusted)</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 3: LIVE DETECTOR -->
+<section>
+  <div class="container">
+    <h2>🔴 Live <span>Detector</span> Output</h2>
+    <p class="section-sub">Current cycle: monitoring 36 active politics/economics markets. Flags raised from the latest poll.</p>
+
+    <h3 style="margin-bottom:12px">Active Markets Being Monitored</h3>
+    <div class="card" style="max-height:260px;overflow-y:auto">
+      <table>
+        <thead><tr><th>Market</th><th>Volume</th><th>Liquidity</th></tr></thead>
+        <tbody>
+          <tr><td>Will the Iranian regime fall by June 30?</td><td>$35.7M</td><td>$1.6M</td></tr>
+          <tr><td>Will China invade Taiwan by end of 2026?</td><td>$23.4M</td><td>$980K</td></tr>
+          <tr><td>Will the U.S. invade Iran before 2027?</td><td>$19.7M</td><td>$1.3M</td></tr>
+          <tr><td>Will Bitcoin hit $150k by June 30, 2026?</td><td>$15.7M</td><td>$20K</td></tr>
+          <tr><td>Will the Iranian regime fall by May 31?</td><td>$13.3M</td><td>$1.1M</td></tr>
+          <tr><td>Will Kevin Warsh be confirmed as Fed Chair?</td><td>$12.4M</td><td>$229K</td></tr>
+          <tr><td>Will Ron DeSantis win the 2028 US Presidential Election?</td><td>$10.3M</td><td>$221K</td></tr>
+          <tr><td>US x Iran permanent peace deal by May 31, 2026?</td><td>$10.3M</td><td>$1.0M</td></tr>
+          <tr><td>Will Wes Moore win the 2028 US Presidential Election?</td><td>$8.6M</td><td>$804K</td></tr>
+          <tr><td>US obtains Iranian enriched uranium by May 31?</td><td>$8.2M</td><td>$549K</td></tr>
+          <tr><td>Strait of Hormuz traffic returns to normal by end of May?</td><td>$4.8M</td><td>$1.0M</td></tr>
+          <tr><td>Strait of Hormuz traffic returns to normal by May 15?</td><td>$4.4M</td><td>$770K</td></tr>
+          <tr><td>Kharg Island no longer under Iranian control by May 31?</td><td>$4.2M</td><td>$662K</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin-top:28px;margin-bottom:12px">Flagged Trades — Latest Cycle</h3>
+    <div class="card">
+      <table>
+        <thead><tr><th>Market</th><th>Signals</th><th>#</th><th>Classification</th><th>Confidence</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Iran closes its airspace by May 8?</td>
+            <td><span class="signal-tag">rapid_repeat</span><span class="signal-tag">vol_price_shift</span><span class="signal-tag">price_impact</span></td>
+            <td>3</td>
+            <td><span class="badge badge-red">informed_trading</span></td>
+            <td><span class="badge badge-red">high</span></td>
+          </tr>
+          <tr>
+            <td>Hormuz blockade lifted by May 22?</td>
+            <td><span class="signal-tag">contrarian</span><span class="signal-tag">size_outlier</span><span class="signal-tag">vol_price_shift</span></td>
+            <td>3</td>
+            <td><span class="badge badge-red">informed_trading</span></td>
+            <td><span class="badge badge-red">high</span></td>
+          </tr>
+          <tr>
+            <td>Iran closes its airspace by May 8?</td>
+            <td><span class="signal-tag">contrarian</span><span class="signal-tag">vol_price_shift</span></td>
+            <td>2</td>
+            <td><span class="badge badge-red">informed_trading</span></td>
+            <td><span class="badge badge-red">high</span></td>
+          </tr>
+          <tr>
+            <td>Hormuz blockade lifted by May 22?</td>
+            <td><span class="signal-tag">contrarian</span><span class="signal-tag">vol_price_shift</span></td>
+            <td>2</td>
+            <td><span class="badge badge-red">informed_trading</span></td>
+            <td><span class="badge badge-red">high</span></td>
+          </tr>
+          <tr>
+            <td>Marine Tondelier wins 2027 French election?</td>
+            <td><span class="signal-tag">contrarian</span><span class="signal-tag">vol_price_shift</span></td>
+            <td>2</td>
+            <td><span class="badge badge-red">informed_trading</span></td>
+            <td><span class="badge badge-red">high</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color:#8892a4;font-size:.8rem;margin-top:12px;text-align:center">Showing top 5 of 15 flags from latest cycle • All classified by qwen2.5:14b running locally via Ollama</p>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 4: VALIDATION -->
+<section style="background:#0d1117">
+  <div class="container">
+    <h2>✅ Validation Against <span>Known Cases</span></h2>
+    <p class="section-sub">We tested the signal engine against 14 confirmed insider-trading markets and 15 clean markets using historical Polymarket trade data. Signals use volatility-adjusted thresholds to reduce false positives on naturally volatile markets.</p>
+
+    <div style="display:flex;gap:40px;align-items:flex-start;flex-wrap:wrap;justify-content:center">
+      <div>
+        <h3 style="text-align:center;margin-bottom:12px">Confusion Matrix (≥20% flag rate, vol-adjusted)</h3>
+        <div class="confusion">
+          <div class="corner"></div>
+          <div class="header">Predicted<br>Insider</div>
+          <div class="header">Predicted<br>Clean</div>
+          <div class="header">Actual<br>Insider</div>
+          <div class="cell tp">12<br><span style="font-size:.7rem">TP</span></div>
+          <div class="cell fn">2<br><span style="font-size:.7rem">FN</span></div>
+          <div class="header">Actual<br>Clean</div>
+          <div class="cell fp">8<br><span style="font-size:.7rem">FP</span></div>
+          <div class="cell tn">7<br><span style="font-size:.7rem">TN</span></div>
+        </div>
+        <div class="metrics-row">
+          <div class="metric"><div class="val">0.60</div><div class="mlbl">Precision</div></div>
+          <div class="metric"><div class="val" style="color:#34d399">0.86</div><div class="mlbl">Recall</div></div>
+          <div class="metric"><div class="val" style="color:#a78bfa">0.71</div><div class="mlbl">F1 Score</div></div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:36px;margin-bottom:12px">Per-Market Breakdown</h3>
+    <div class="card" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr><th>Label</th><th>Flagged</th><th>Window</th><th>Rate</th><th>Max Sig</th><th>Market</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge badge-red">insider</span></td><td>1,351</td><td>2,758</td><td>49.0%</td><td>6</td><td>US strikes Iran by February 28, 2026?</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>585</td><td>1,347</td><td>43.4%</td><td>6</td><td>US strikes Iran by March 1, 2026?</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>208</td><td>303</td><td>68.6%</td><td>4</td><td>US forces enter Iran by April 30?</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>155</td><td>388</td><td>39.9%</td><td>6</td><td>Nobel Peace Prize — Machado</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>107</td><td>362</td><td>29.6%</td><td>5</td><td>US forces enter Iran by March 31?</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>105</td><td>267</td><td>39.3%</td><td>5</td><td>US strikes Iran by Feb 19 (failed pre-position)</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>114</td><td>857</td><td>13.3%</td><td>6</td><td>US strikes Iran by Feb 20</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>32</td><td>107</td><td>29.9%</td><td>4</td><td>Israel strike Yemen Sept 11</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>29</td><td>78</td><td>37.2%</td><td>3</td><td>US-Iran ceasefire before July</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>9</td><td>24</td><td>37.5%</td><td>3</td><td>Israel strike Iran Sun Oct 13</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>7</td><td>20</td><td>35.0%</td><td>2</td><td>Israel strike Iran Sat Oct 12</td></tr>
+          <tr><td><span class="badge badge-red">insider</span></td><td>6</td><td>24</td><td>25.0%</td><td>3</td><td>Israel-Iran ceasefire</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">insider</span></td><td>5</td><td>24</td><td>20.8%</td><td>2</td><td>US forces enter Iran Mar 1 ⚠️ borderline</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">insider</span></td><td>0</td><td>15</td><td>0.0%</td><td>0</td><td>Maduro capture ⚠️ missed (spread over days)</td></tr>
+          <tr><td colspan="6" style="padding:12px 0;border:none"></td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>0</td><td>24</td><td>0.0%</td><td>0</td><td>NBA Finals 2024 Winner</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>1</td><td>81</td><td>1.2%</td><td>3</td><td>Fed rate cut Dec 2024</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>1</td><td>19</td><td>5.3%</td><td>3</td><td>Rubio confirmed SecState</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>1</td><td>15</td><td>6.7%</td><td>2</td><td>Bessent confirmed Treasury</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>19</td><td>158</td><td>12.0%</td><td>3</td><td>Bitcoin above $94k May 2 2025</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>9</td><td>53</td><td>17.0%</td><td>5</td><td>Fed rate cut 2025</td></tr>
+          <tr><td><span class="badge badge-green">clean</span></td><td>5</td><td>27</td><td>18.5%</td><td>5</td><td>CL Final 2024 Real Madrid v Dortmund</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">clean</span></td><td>626</td><td>2,374</td><td>26.4%</td><td>5</td><td>Bitcoin above $90k Nov 22 ⚠️ FP (volatile)</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">clean</span></td><td>131</td><td>298</td><td>44.0%</td><td>6</td><td>Celtics win 2025 NBA Finals ⚠️ FP</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">clean</span></td><td>491</td><td>797</td><td>61.6%</td><td>6</td><td>OKC Thunder 2025 NBA Finals ⚠️ FP (volatile)</td></tr>
+          <tr style="opacity:.5"><td><span class="badge badge-yellow">clean</span></td><td>834</td><td>1,330</td><td>62.7%</td><td>6</td><td>Bitcoin above $100k Dec 13 ⚠️ FP (volatile)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:#8892a4;font-size:.82rem;margin-top:12px;text-align:center">
+      False positives are concentrated in high-volatility markets (Bitcoin, NBA) where natural price swings trigger contrarian/price_impact signals.
+      Volatility-adjusted thresholds reduce but don't eliminate these — remaining FPs are markets with market-maker activity that mimics insider patterns.
+    </p>
+  </div>
+</section>
+
+<!-- SECTION 5: TECH STACK -->
+<section>
+  <div class="container">
+    <h2>🛠️ Tech <span>Stack</span></h2>
+    <p class="section-sub">Fully local, no cloud APIs, no paid services. Everything runs on a single machine.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+      <div class="card" style="padding:16px;text-align:center"><strong>Python 3.14</strong><br><span style="color:#8892a4;font-size:.82rem">Async polling with httpx</span></div>
+      <div class="card" style="padding:16px;text-align:center"><strong>SQLite</strong><br><span style="color:#8892a4;font-size:.82rem">Markets, trades, flags</span></div>
+      <div class="card" style="padding:16px;text-align:center"><strong>Ollama + qwen2.5:14b</strong><br><span style="color:#8892a4;font-size:.82rem">Local LLM for filtering &amp; classification</span></div>
+      <div class="card" style="padding:16px;text-align:center"><strong>Polymarket APIs</strong><br><span style="color:#8892a4;font-size:.82rem">Gamma (markets) + Data (trades) + CLOB</span></div>
+      <div class="card" style="padding:16px;text-align:center"><strong>Kiro CLI</strong><br><span style="color:#8892a4;font-size:.82rem">Built entirely via AI-assisted development</span></div>
+      <div class="card" style="padding:16px;text-align:center"><strong>47 Tests</strong><br><span style="color:#8892a4;font-size:.82rem">pytest covering fetcher, signals, classifier, DB</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Polymarket Anomaly Detector — KiroHacks 2026 • Built with Kiro CLI</p>
+    <p style="margin-top:4px">Intellectual Pursuit Track: Turning curiosity into discovery</p>
+  </div>
+</footer>
+
+</body>
+</html>

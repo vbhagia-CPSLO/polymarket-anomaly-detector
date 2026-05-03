@@ -14,6 +14,7 @@ _SIZE_OUTLIER_MIN_TRADES = 3   # minimum trades in market to compute stdev
 _RELATIVE_SIZE_THRESHOLD = 0.05  # trade.size / market.liquidity > 5%
 _PRE_RESOLUTION_HOURS = 24     # large trade within 24h of market end_date
 _PRICE_IMPACT_THRESHOLD = 0.05  # single trade caused >5pp price shift
+VOL_BASELINE = 0.10            # volatility normalization baseline
 
 
 def _mean_stdev(values: list[float]) -> tuple[float, float]:
@@ -52,6 +53,13 @@ def compute_signals(
         market = markets_by_id.get(condition_id)
         current_price = market.outcome_prices[0] if market and market.outcome_prices else None
 
+        # --- volatility adjustment: scale contrarian/price_impact thresholds ---
+        prices = [t.price for t in trades if 0 < t.price < 1]
+        _, price_stdev = _mean_stdev(prices) if len(prices) >= 3 else (0.0, 0.0)
+        vol_factor = max(1.0, price_stdev / VOL_BASELINE)  # normalize against baseline
+        contrarian_thresh = _CONTRARIAN_THRESHOLD * vol_factor
+        price_impact_thresh = _PRICE_IMPACT_THRESHOLD * vol_factor
+
         # --- rapid_repeat_trades: wallet with >=3 trades in this market ---
         wallet_trade_count: dict[str, int] = defaultdict(int)
         for t in trades:
@@ -70,7 +78,7 @@ def compute_signals(
             window_open_price = trades[-1].price
             price_shift = abs(current_price - window_open_price)
             if total_volume > 0 and market.liquidity > 0:
-                if price_shift > _PRICE_SHIFT_THRESHOLD and total_volume < market.liquidity * 0.1:
+                if price_shift > _PRICE_SHIFT_THRESHOLD * vol_factor and total_volume < market.liquidity * 0.1:
                     market_flagged = True
 
         # --- pre_resolution_trade: is market within 24h of end_date? ---
@@ -86,7 +94,7 @@ def compute_signals(
                 signals[t.transaction_hash].append("large_position")
 
             # contrarian_trade
-            if current_price is not None and abs(t.price - current_price) > _CONTRARIAN_THRESHOLD:
+            if current_price is not None and abs(t.price - current_price) > contrarian_thresh:
                 signals[t.transaction_hash].append("contrarian_trade")
 
             # rapid_repeat_trades
@@ -112,7 +120,7 @@ def compute_signals(
             # price_impact: this trade caused >5pp shift vs adjacent trade
             if len(trades) >= 2 and i < len(trades) - 1:
                 prev_price = trades[i + 1].price  # previous trade (older)
-                if abs(t.price - prev_price) > _PRICE_IMPACT_THRESHOLD:
+                if abs(t.price - prev_price) > price_impact_thresh:
                     signals[t.transaction_hash].append("price_impact")
 
-    return dict(signals)
+    return {tx: list(dict.fromkeys(sigs)) for tx, sigs in signals.items()}
